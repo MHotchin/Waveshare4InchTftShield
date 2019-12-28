@@ -14,8 +14,8 @@ namespace
 	//GPIO config
 	//LCD
 
-	//  D1 R1 pins are not 'general purpose". D5, D6 and D7 are actually *duplicates* op
-	//  D11, d12 and D13, so you can't use them at all.  D9 is hard to use, it's part of
+	//  D1 R1 pins are not 'general purpose". D5, D6 and D7 are actually *duplicates* of
+	//  D11, D12 and D13, so you can't use them at all.  D9 is hard to use, it's part of
 	//  the reboot process.  D1 is Serial TX, you probably want that for debugging.
 	//  So, you can't plug the shield into a D1 R1, you need to map the pins.
 	//
@@ -49,8 +49,10 @@ namespace
 	constexpr int16_t LCD_HEIGHT = 480;
 }
 
-//  Data sheets says min clock width is 66ns, for a max clock of 15 MHz.
-SPISettings _tftSpiSettingsWrite(15000000, MSBFIRST, SPI_MODE0);
+//  Data sheets says min clock width is 66ns, for a max clock of 15 MHz.  Except, this
+//  thing isn't *actually* SPI!  It's a 16 bit shift register connected to the parallel
+//  interface, and that can run at 20 Mhz
+SPISettings _tftSpiSettingsWrite(20000000, MSBFIRST, SPI_MODE0);
 
 //  TFT reads are slower, 150 ns period.
 //  Nevermind, Waveshare shield doesn't support reads at all!
@@ -58,8 +60,6 @@ SPISettings _tftSpiSettingsWrite(15000000, MSBFIRST, SPI_MODE0);
 
 //  Touch screen wants 400 ns period.
 SPISettings tsSpiSettings(2500000, MSBFIRST, SPI_MODE0);
-
-
 
 
 Waveshare4InchTftShield::Waveshare4InchTftShield()
@@ -85,21 +85,6 @@ Waveshare4InchTftShield::Waveshare4InchTftShield()
 	pinMode(SD_CS, OUTPUT);
 	digitalWrite(SD_CS, HIGH);
 }
-
-//  Set up SPI and chip select
-Waveshare4InchTftShield::lcdSequence::lcdSequence(
-	const SPISettings &spi)
-{
-	SPI.beginTransaction(spi);
-	digitalWrite(LCD_CS, LOW);
-}
-
-Waveshare4InchTftShield::lcdSequence::~lcdSequence()
-{
-	digitalWrite(LCD_CS, HIGH);
-	SPI.endTransaction();
-}
-
 
 namespace
 {
@@ -128,11 +113,6 @@ namespace
 
 	inline void lcdWriteData16(uint16_t data)
 	{
-		//byte bytes[4] = {0, data>>8, 0, data &0xFF};
-
-		//digitalWrite(LCD_DC, HIGH);
-		//SPI.transfer(bytes, sizeof(bytes));
-
 		lcdWriteData(uint8_t(data >> 8));
 		lcdWriteDataContinue(uint8_t(data & 0xff));
 	}
@@ -146,26 +126,88 @@ namespace
 #ifdef ARDUINO_ARCH_AVR
 	//  Version of SPI.transfer(...) that *doesn't* read data back into the buffer.
 	//  
-	inline static void transferOut(void *buf, size_t count)
+
+	//  Wrote this, then went with a bulk repeat implementation instead.
+	//inline static void transferOut(void *buf, size_t count)
+	//{
+	//	if (count == 0) return;
+	//	uint8_t *p = (uint8_t *)buf;
+	//	SPDR = *p++;
+	//	while (--count > 0)
+	//	{
+	//		uint8_t out = *p++;
+	//		while (!(SPSR & _BV(SPIF)));
+	//		SPDR = out;
+	//	}
+	//	while (!(SPSR & _BV(SPIF)));
+	//}
+
+
+	inline static void transfer16Repeat(uint16_t data, unsigned long count)
 	{
-		if (count == 0) return;
-		uint8_t *p = (uint8_t *)buf;
-		SPDR = *p++;
-		while (--count > 0)
+		if (count == 0)
 		{
-			uint8_t out = *p++;
-			while (!(SPSR & _BV(SPIF)));
-			SPDR = out;
+			return;
 		}
+
+		//  Fast way to split a 16bit into into 2 8 bit ints.
+		union
+		{
+			uint16_t val;
+			struct
+			{
+				uint8_t lsb; uint8_t msb;
+			};
+		} in;
+		in.val = data;
+
+		//  Slightly faster using these, I think the optimizer can take advantage that
+		//  there is no aliasing?
+		const uint8_t msb = in.msb;
+		const uint8_t lsb = in.lsb;
+
+		//  Loop phase shifting AND Duff's device?  Inconceivable!
+		SPDR = msb;
+		count--;
 		while (!(SPSR & _BV(SPIF)));
+		SPDR = lsb;
+		switch (count & 0x01)
+		{
+		case 0:
+			while (count)
+			{
+				count--;
+				while (!(SPSR & _BV(SPIF)));
+				SPDR = msb;
+				asm volatile("nop");
+				while (!(SPSR & _BV(SPIF)));
+				SPDR = lsb;
+		case 1:
+				count--;
+				while (!(SPSR & _BV(SPIF)));
+				SPDR = msb;
+				asm volatile("nop");
+				while (!(SPSR & _BV(SPIF)));
+				SPDR = lsb;
+			}
+		}
+		// MUST wait for final shift out to complete!  Otherwise subsequent commands
+		// happen quickly enough to stomp on it.
+		asm volatile("nop");
+		while (!(SPSR & _BV(SPIF)));
+
 	}
 #endif
 
 	inline void lcdWriteDataRepeat(uint16_t data, unsigned long count)
 	{
 		lcdWriteReg(0x2C);
+		digitalWrite(LCD_DC, HIGH);
 
 #ifdef ARDUINO_ESP8266_WEMOS_D1R1
+		//
+		//  ESP8266 seems to have better bulk transfer APIs for SPI.  Only verified on
+		//  Wemos D1 R1.
 		uint8_t pattern[2];
 		pattern[0] = data >> 8;
 		pattern[1] = data & 0xff;
@@ -173,47 +215,14 @@ namespace
 		SPI.writePattern(pattern, 2, count);
 
 #elif defined ARDUINO_ARCH_AVR
-		if (count >= 16)
-		{
-			//  Larger numbers make things faster overall, but uses more stack space.
-			//  Gains are marginal, about .5% going to 256 bytes.
-			uint8_t buffer[64];
-
-			const unsigned long countUsed = min(sizeof(buffer), count * 2);
-
-			for (unsigned long i = 0; i < countUsed; i += 2)
-			{
-				buffer[i] = data >> 8;
-				buffer[i + 1] = data & 0xFF;
-			}
-
-			digitalWrite(LCD_DC, HIGH);
-			unsigned long i;
-
-			for (i = sizeof(buffer) / 2; i <= count; i += sizeof(buffer) / 2)
-			{
-				transferOut(buffer, sizeof(buffer));
-			}
-
-			unsigned long leftOver = count - i + (sizeof(buffer) / 2);
-			transferOut(buffer, leftOver * 2);
-
-		}
-		else
-		{
-			digitalWrite(LCD_DC, HIGH);
-			for (unsigned long i = 0; i < count; i++)
-			{
-				SPI.transfer16(data);
-			}
-		}
+		//  On AVR it's pretty easy to write a better bulk repeat directly, so use that.
+		transfer16Repeat(data, count);
 #else
-		digitalWrite(LCD_DC, HIGH);
+		//  Otherwise, just do it the boring way.
 		for (unsigned long i = 0; i < count; i++)
 		{
 			SPI.transfer16(data);
 		}
-
 #endif
 }
 
@@ -291,11 +300,11 @@ Waveshare4InchTftShield::begin(uint8_t brightness)
 
 
 
-//uint8_t
-//Waveshare4InchTftShield::GetSdCardCS()
-//{
-//	return SD_CS;
-//}
+uint8_t
+Waveshare4InchTftShield::GetSdCardCS()
+{
+	return SD_CS;
+}
 
 
 
@@ -313,32 +322,27 @@ Waveshare4InchTftShield::initializeLcd()
 	//  TO-DO - how long after a reset until the screen can be used?  Doesn't seem to be
 	//  specified in the datasheet.
 	//  Experimentally, any less than this and the initial screen clear is incomplete.
-	delay(60);
+	delay(65);
 
+	startWrite();
 	{
-		lcdSequence seq(_tftSpiSettingsWrite);
-
-		//	//  F9 is not a valid register??
-			//lcdWriteCommand(0xF9, 0x00, 0x08);
-
+		//  Power control settings
 		lcdWriteCommand(0xC0, 0x19, 0x1a);
-
 		lcdWriteCommand(0xC1, 0x45, 0x00);
+		lcdWriteCommand(0xC2, 0x33);        //  Power/Reset on default
 
-		lcdWriteCommand(0xC2, 0x33);
+		lcdWriteCommand(0xC5, 0x00, 0x28);  //  VCOM control
 
-		lcdWriteCommand(0xC5, 0x00, 0x28);
+		lcdWriteCommand(0xB1, 0xA0, 0x11);  //  Frame rate control
 
-		lcdWriteCommand(0xB1, 0xA0, 0x11);
+		lcdWriteCommand(0xB4, 0x02);        //  Display Z Inversion
 
-		lcdWriteCommand(0xB4, 0x02);
-
-		lcdWriteReg(0xB6);
+		lcdWriteReg(0xB6);                  //  Display Control Function      
 		lcdWriteData(0x00);
 		lcdWriteDataContinue(0x42);
 		lcdWriteDataContinue(0x3B);
 
-		lcdWriteReg(0xE0);
+		lcdWriteReg(0xE0);                  //  Positive Gamma control
 		lcdWriteData(0x1F);
 		lcdWriteDataContinue(0x25);
 		lcdWriteDataContinue(0x22);
@@ -355,7 +359,7 @@ Waveshare4InchTftShield::initializeLcd()
 		lcdWriteDataContinue(0x00);
 		lcdWriteDataContinue(0x00);
 
-		lcdWriteReg(0XE1);
+		lcdWriteReg(0XE1);                  //  Negative Gamma control
 		lcdWriteData(0x1F);
 		lcdWriteDataContinue(0x3F);
 		lcdWriteDataContinue(0x3F);
@@ -372,38 +376,6 @@ Waveshare4InchTftShield::initializeLcd()
 		lcdWriteDataContinue(0x1A);
 		lcdWriteDataContinue(0x00);
 
-		//  Not valid registers?
-
-		//lcdWriteReg(0XF1);
-		//lcdWriteData(0x36);
-		//lcdWriteDataContinue(0x04);
-		//lcdWriteDataContinue(0x00);
-		//lcdWriteDataContinue(0x3C);
-		//lcdWriteDataContinue(0x0F);
-		//lcdWriteDataContinue(0x0F);
-		//lcdWriteDataContinue(0xA4);
-		//lcdWriteDataContinue(0x02);
-
-		//lcdWriteReg(0XF2);
-		//lcdWriteData(0x18);
-		//lcdWriteDataContinue(0xA3);
-		//lcdWriteDataContinue(0x12);
-		//lcdWriteDataContinue(0x02);
-		//lcdWriteDataContinue(0x32);
-		//lcdWriteDataContinue(0x12);
-		//lcdWriteDataContinue(0xFF);
-		//lcdWriteDataContinue(0x32);
-		//lcdWriteDataContinue(0x00);
-
-		//lcdWriteReg(0XF4);
-		//lcdWriteData(0x40);
-		//lcdWriteDataContinue(0x00);
-		//lcdWriteDataContinue(0x08);
-		//lcdWriteDataContinue(0x91);
-		//lcdWriteDataContinue(0x04);
-
-		//lcdWriteCommand(0xF8, 0x21, 0x04);
-
 		lcdWriteCommand(0x3A, 0x55);
 
 		//  Set initial rotation to match AFX defaults - tall / narrow
@@ -412,13 +384,12 @@ Waveshare4InchTftShield::initializeLcd()
 
 		lcdWriteReg(0x11); // Sleep out
 
-		delay(5);
-
-		lcdWriteActiveRect(0, 0, LCD_WIDTH, LCD_HEIGHT);
-		lcdWriteDataRepeat(0x0000, (long)LCD_WIDTH * LCD_HEIGHT);
-
+		//  Fill screen to black
+		writeFillRect(0, 0, LCD_WIDTH, LCD_HEIGHT, 0x0000);
+		
 		lcdWriteReg(0x29);  // Turn on display
 	}
+	endWrite();
 }
 
 
@@ -426,15 +397,9 @@ void
 Waveshare4InchTftShield::drawPixel(
 	int16_t x, int16_t y, uint16_t color)
 {
-	if (x < 0) return;
-	if (y < 0) return;
-
-	if (x >= LCD_WIDTH) return;
-	if (y >= LCD_HEIGHT) return;
-
 	startWrite();
 
-	writeFillRect(x, y, 1, 1, color);
+	writePixel(x, y, color);
 
 	endWrite();
 }
@@ -456,7 +421,7 @@ Waveshare4InchTftShield::writePixel(
 	if (x >= width()) return;
 	if (y >= height()) return;
 
-	writeFillRect(x, y, 1, 1, color);
+	writeFillRect2(x, y, 1, 1, color);
 }
 
 
@@ -513,6 +478,12 @@ Waveshare4InchTftShield::writeFillRect(int16_t x, int16_t y, int16_t w, int16_t 
 	lcdWriteDataRepeat(color, (int32_t)w * (int32_t)h);
 }
 
+void
+Waveshare4InchTftShield::writeFillRect2(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color)
+{
+	lcdWriteActiveRect(x, y, w, h);
+	lcdWriteDataRepeat(color, (int32_t)w * (int32_t)h);
+}
 
 void
 Waveshare4InchTftShield::writeFastVLine(int16_t x, int16_t y, int16_t h, uint16_t color)
@@ -559,10 +530,11 @@ Waveshare4InchTftShield::setRotation(uint8_t r)
 		break;
 	}
 
-	lcdSequence seq(_tftSpiSettingsWrite);
+	startWrite();
 	{
 		lcdWriteCommand(0x36, MemoryAccessControl_0x36);
 	}
+	endWrite();
 
 	//  Don't forget to tell the base class!
 	Adafruit_GFX::setRotation(r);
@@ -572,10 +544,11 @@ Waveshare4InchTftShield::setRotation(uint8_t r)
 void
 Waveshare4InchTftShield::invertDisplay(boolean i)
 {
-	lcdSequence seq(_tftSpiSettingsWrite);
+	startWrite();
 	{
 		lcdWriteReg(i ? 0x21 : 0x20);
 	}
+	endWrite();
 }
 
 
@@ -608,7 +581,7 @@ void
 Waveshare4InchTftShield::fillScreen(uint16_t color)
 {
 	startWrite();
-	writeFillRect(0, 0, width(), height(), color);
+	writeFillRect2(0, 0, width(), height(), color);
 	endWrite();
 }
 
@@ -620,6 +593,16 @@ Waveshare4InchTftShield::setScreenBrightness(uint8_t brightness)
 	analogWrite(LCD_BL, brightness);
 }
 
+
+void
+Waveshare4InchTftShield::setIdleMode(bool idle)
+{
+	startWrite();
+	{
+		lcdWriteReg(idle ? 0x39 : 0x38);
+	}
+	endWrite();
+}
 
 //  Touchscreen interface
 
@@ -667,7 +650,7 @@ static void insert_sort(int array[], uint8_t size)
 		for (j = i; j >= 1 && save < array[j - 1]; j--)
 			array[j] = array[j - 1];
 		array[j] = save;
-}
+	}
 }
 #endif
 
@@ -702,7 +685,6 @@ namespace
 		SPI.endTransaction();
 
 		return data;
-
 	}
 }
 
@@ -741,6 +723,9 @@ Waveshare4InchTftShield::getPoint()
 	uint8_t i, valid;
 
 	valid = 1;
+
+	//  Discard first reading, other code indicates it's noisy.
+	readTouchX();
 
 	for (i = 0; i < NUMSAMPLES; i++)
 	{
@@ -805,7 +790,7 @@ Waveshare4InchTftShield::getPoint()
 	}
 
 	return TSPoint(x, y, z);
-	}
+}
 
 
 namespace
@@ -853,22 +838,22 @@ Waveshare4InchTftShield::normalizeTsPoint(
 	{
 		if (p.x < tscd.xMin)
 		{
-			Serial.println(p.x); tscd.xMin = p.x;
+			tscd.xMin = p.x;
 		}
 		if (p.x > tscd.xMax)
 		{
-			Serial.println(p.x); tscd.xMax = p.x;
+			tscd.xMax = p.x;
 		}
 	}
 	if (p.y > 0)
 	{
 		if (p.y < tscd.yMin)
 		{
-			Serial.println(p.y); tscd.yMin = p.y;
+			tscd.yMin = p.y;
 		}
 		if (p.y > tscd.yMax)
 		{
-			Serial.println(p.y); tscd.yMax = p.y;
+			tscd.yMax = p.y;
 		}
 	}
 	p.x = map(p.x, tscd.xMin, tscd.xMax, 0, LCD_WIDTH - 1);
@@ -892,12 +877,10 @@ Waveshare4InchTftShield::normalizeTsPoint(
 		p.y = LCD_HEIGHT - 1 - p.y;
 		break;
 
-
 	case 3:
 		swap(p.x, p.y);
 		p.y = LCD_WIDTH - 1 - p.y;
 		break;
-
 	}
 }
 

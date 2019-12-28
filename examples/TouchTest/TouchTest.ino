@@ -30,10 +30,6 @@ namespace
 
 void setup() 
 {
-    Serial.begin(115200);
-
-    while (!Serial);
-
     SPI.begin();
     Waveshield.begin();
 
@@ -49,14 +45,18 @@ int i = 0;
 // the loop function runs over and over again until power down or reset
 void loop()
 {
+    //  Get raw touchscreen values.
     TSPoint p = Waveshield.getPoint();
 
     //  Remaps raw touchscreen values to screen co-ordinates.  Automatically handles
     //  rotation!
     Waveshield.normalizeTsPoint(p);
 
-    Waveshield.fillCircle(p.x, p.y, 4, BLUE);
+    //  Now that we have a point in screen co-ordinates, draw something there.
+    Waveshield.fillCircle(p.x, p.y, 3, BLUE);
 
+    // After ten seconds, start re-drawing the background.  Draw one line each time
+    // through the loop, in a variety of colors.
     if (millis() / 1000 > 10)
     {
         uint16_t color = i << 7 ^ i;

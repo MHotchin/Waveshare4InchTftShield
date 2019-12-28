@@ -114,11 +114,11 @@ public:
 
 	//  Non Adafruit GFX APIs
 	void setScreenBrightness(uint8_t);
-	
+	//  'Idle mode' is 8 color display mode.
+	void setIdleMode(bool i);
+
 	//  Guess who doesn't provide read access to their LCD?
 	//  uint16_t readPixel(int16_t x, int16_t y);
-
-
 
 	//  Touchscreen interface, code compatible with Adafruit 'Touchscreen' class.
 	//  Implements the 'WaveshareTouchScreen' interface defined above.
@@ -141,12 +141,9 @@ public:
 	void normalizeTsPoint(TSPoint &p);
 
 private:
-	class lcdSequence
-	{
-	public:
-		lcdSequence(const SPISettings &);
-		~lcdSequence();
-	};
+
+	//  Version with no bounds checking.
+	void writeFillRect2(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color);
 
 	void initializeLcd();
 };

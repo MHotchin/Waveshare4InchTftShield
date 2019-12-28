@@ -26,8 +26,6 @@
 namespace
 {
 	Waveshare4InchTftShield Waveshield;
-	//SdFat sd;
-
 
 	//  Provide an alias so I don't have to search-and-replace all the code below.
 	Adafruit_GFX &tft = Waveshield;
@@ -511,6 +509,7 @@ void setup()
 void loop()
 {
 	//  Run the Adafruit tests.
+	//  We'll run using a different rotation to show that everything works!
 	tft.setRotation(2);
 	runtests();
 
@@ -519,11 +518,11 @@ void loop()
 	tft.setRotation(0);
 	RunSpeedTest();
 
-
-	//  Show how text prints under differnt rotations.
+	//  Show how text prints under different rotations.
 	tft.fillScreen(BLUE);
 	for (int i = 0; i < 4; i++)
 	{
+		//  Changing rotation should NOT affect anything currently on the screen!
 		tft.setRotation(i);
 		tft.print("Hello World! ");
 		tft.println(i);
