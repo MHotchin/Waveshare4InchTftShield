@@ -6,6 +6,9 @@ substantially faster than the original Waveshare sample software, and provides a
 integrated Touchscreen interface.  I don't have one to test on, but it should work for the
 3.5" screen as well.
 
+- [Waveshare 4" Touch LCD Shield for Arduino](https://www.waveshare.com/product/modules/oleds-lcds/arduino-lcd/4inch-tft-touch-shield.htm) (SKU: 13587)
+- [Waveshare 3.5" Touch LCD Shield for Arduino](https://www.waveshare.com/product/modules/oleds-lcds/arduino-lcd/3.5inch-tft-touch-shield.htm) (SKU: 13506)
+
 The touch screen will also calibrate itself automatically, and provides access to the
 calibration data so that is can be stored (for example, in EEPROM) and then set, so that
 the touch screen will maintain its calibration across reboots.
@@ -28,3 +31,19 @@ Under examples there is:
  To calibrate the screen, simply run the stylus off all four edges of the screen a few
  times.  This calibration can be retrieved using `getTsConfigData()`, saved, and restored
  later using `setTsConfigData()`.
+
+ Wiki support pages:
+- [Waveshare 4inch TFT Touch Shield Wiki](https://www.waveshare.com/wiki/4inch_TFT_Touch_Shield)
+- [Waveshare 3.5inch TFT Touch Shield Wiki](https://www.waveshare.com/wiki/3.5inch_TFT_Touch_Shield)
+
+## Authors
+
+* **Waveshare team** - *Original driver code* - [Waveshare](https://www.waveshare.com/)
+* **ImpulseAdventure** - *Arduino library adaptation* - [ImpulseAdventure](https://github.com/ImpulseAdventure/)
+* **M Hotchin** - *Updated Arduino library*
+
+## License
+
+- This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details
+- The Waveshare team has requested that their code retain a note indicating that the original code is from Waveshare.
+- This library leverages the Adafruit-GFX API, with a BSD license.
