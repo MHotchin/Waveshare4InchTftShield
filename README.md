@@ -32,6 +32,9 @@ Under examples there is:
  times.  This calibration can be retrieved using `getTsConfigData()`, saved, and restored
  later using `setTsConfigData()`.
 
+ This library can be installed manually, or it is available from the Arduino IDE Library Manager.
+ Search for "waveshare4inch" in the Library Manager.
+ 
  Wiki support pages:
 - [Waveshare 4inch TFT Touch Shield Wiki](https://www.waveshare.com/wiki/4inch_TFT_Touch_Shield)
 - [Waveshare 3.5inch TFT Touch Shield Wiki](https://www.waveshare.com/wiki/3.5inch_TFT_Touch_Shield)
