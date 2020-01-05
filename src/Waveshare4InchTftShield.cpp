@@ -27,6 +27,28 @@ namespace
 	constexpr unsigned int TP_CS = D0;
 
 	constexpr unsigned int SD_CS = D2;
+#elif defined ARDUINO_ESP32_DEV
+	
+	//  TO-DO - is this specific enough?  Pins below are for Wemos D1 R32, but that
+	//  doesn't seem to have its own board.
+
+	//  SERIOUSLY?  No analogWrite on this platform?  Idiots.
+	void analogWrite(uint8_t pin, uint8_t val)
+	{
+		//  Shortcut - it's either on or off
+		digitalWrite(pin, val ? HIGH : LOW);
+	}
+
+	constexpr unsigned int LCD_CS  = 5;  // 10; //  LCD Chip Select
+	constexpr unsigned int LCD_BL  = 13; // 9;  //  LCD Backlight
+	constexpr unsigned int LCD_RST = 12; // 8;  //  LCD Reset
+	constexpr unsigned int LCD_DC  = 14; // 7;  //  LCD Data/Control
+
+	constexpr unsigned int TP_CS = 17;   // 4;
+	//constexpr unsigned int TP_IRQ = 3;
+	//constexpr unsigned int TP_BUSY = 6;
+
+	constexpr unsigned int SD_CS = 16;   // 5;
 
 #else
 
@@ -204,10 +226,9 @@ namespace
 		lcdWriteReg(0x2C);
 		digitalWrite(LCD_DC, HIGH);
 
-#ifdef ARDUINO_ESP8266_WEMOS_D1R1
+#ifdef ARDUINO_ARCH_ESP32
 		//
-		//  ESP8266 seems to have better bulk transfer APIs for SPI.  Only verified on
-		//  Wemos D1 R1.
+		//  ESP8266 seems to have better bulk transfer APIs for SPI.  
 		uint8_t pattern[2];
 		pattern[0] = data >> 8;
 		pattern[1] = data & 0xff;
@@ -256,12 +277,12 @@ namespace
 		ActiveBounds b = {0, (uint8_t)(xStart >> 8), 0, (uint8_t)(xStart & 0xFF), 0, (uint8_t)(xEnd >> 8), 0, (uint8_t)(xEnd & 0xFF)};
 		lcdWriteReg(0x2a);
 		digitalWrite(LCD_DC, HIGH);
-		SPI.transfer(&b, sizeof(b));
+		SPI.transfer((byte *)&b, sizeof(b));
 
 		b = {0, (uint8_t)(yStart >> 8), 0, (uint8_t)(yStart & 0xFF), 0, (uint8_t)(yEnd >> 8), 0, (uint8_t)(yEnd & 0xFF)};
 		lcdWriteReg(0x2b);
 		digitalWrite(LCD_DC, HIGH);
-		SPI.transfer(&b, sizeof(b));
+		SPI.transfer((byte *)&b, sizeof(b));
 	}
 }
 
@@ -830,18 +851,22 @@ namespace
 //  Normalize the touchscreen readings to the dimensions of the screen.  Automatically
 //  adjusts the limits over time.  To calibrate, just run the stylus off each of the four
 //  edges of the screen.
-void
+bool
 Waveshare4InchTftShield::normalizeTsPoint(
 	TSPoint &p)
 {
+	bool fReturn = false;
+
 	if (p.x > 0)
 	{
 		if (p.x < tscd.xMin)
 		{
+			fReturn = true;
 			tscd.xMin = p.x;
 		}
 		if (p.x > tscd.xMax)
 		{
+			fReturn = true;
 			tscd.xMax = p.x;
 		}
 	}
@@ -849,10 +874,12 @@ Waveshare4InchTftShield::normalizeTsPoint(
 	{
 		if (p.y < tscd.yMin)
 		{
+			fReturn = true;
 			tscd.yMin = p.y;
 		}
 		if (p.y > tscd.yMax)
 		{
+			fReturn = true;
 			tscd.yMax = p.y;
 		}
 	}
@@ -882,5 +909,7 @@ Waveshare4InchTftShield::normalizeTsPoint(
 		p.y = LCD_WIDTH - 1 - p.y;
 		break;
 	}
+
+	return fReturn;
 }
 

@@ -138,7 +138,8 @@ public:
 	//  Convert the TsPoint to current screen co-ordinates.  This will also calibrate the
 	//  screen as it goes.  To calibrate the screen, just run the stylus off each of the
 	//  four edges, calling this on the points as you do so.
-	void normalizeTsPoint(TSPoint &p);
+	//  Returns TRUE if the calibration data has been updated.
+	bool normalizeTsPoint(TSPoint &p);
 
 private:
 
