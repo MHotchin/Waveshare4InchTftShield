@@ -709,15 +709,24 @@ namespace
 	}
 }
 
+//  Approx resistance of the touchplate across the X-axis
+constexpr uint16_t _rxplate = 300;
+
 uint16_t
 Waveshare4InchTftShield::pressure()
 {
-	uint32_t Z1 = readChannel(0b10110000);
-	uint32_t Z2 = readChannel(0b11000000);
+	uint32_t z1 = readChannel(0b10110000);
+	uint32_t z2 = readChannel(0b11000000);
 
-	if (Z1 > Z2) return 0;
+	float rtouch;
+	rtouch = z2;
+	rtouch /= z1;
+	//rtouch -= 1;
+	rtouch *= ((uint16_t)(readTouchX()));
+	rtouch *= _rxplate;
+	rtouch /= 1024;
 
-	return (Z2 - Z1);
+	return (rtouch);
 }
 
 
