@@ -223,14 +223,10 @@ namespace
 		lcdWriteReg(0x2C);
 		digitalWrite(LCD_DC, HIGH);
 
-#ifdef ARDUINO_ARCH_ESP32
 		while (count--)
+		{
 			SPI.transfer16(*pData++);
-
-#else
-		while (count--)
-			SPI.transfer16(*pData++);
-#endif
+		}
 	}
 
 	inline void lcdWriteCommand(uint8_t reg, uint8_t data)
@@ -246,12 +242,10 @@ namespace
 		lcdWriteDataContinue(data2);
 	}
 
-
 	struct ActiveBounds
 	{
 		uint8_t data[8];
 	};
-
 
 	inline void lcdWriteActiveRect(uint16_t xUL, uint16_t yUL, uint16_t xSize, uint16_t ySize)
 	{
@@ -264,22 +258,12 @@ namespace
 		lcdWriteReg(0x2a);
 		digitalWrite(LCD_DC, HIGH);
 		SPI.transfer((byte *)&b, sizeof(b));
-		//for (auto i = 0; i < 8; i++)
-		//{
-		//	SPI.transfer(b.data[i]);
-		//}
 
 		b = {0, (uint8_t)(yStart >> 8), 0, (uint8_t)(yStart & 0xFF), 0, (uint8_t)(yEnd >> 8), 0, (uint8_t)(yEnd & 0xFF)};
 		lcdWriteReg(0x2b);
 		digitalWrite(LCD_DC, HIGH);
 		SPI.transfer((byte *)&b, sizeof(b));
-		//for (auto i = 0; i < 8; i++)
-		//{
-		//	SPI.transfer(b.data[i]);
-		//}
 	}
-
-
 }
 
 
