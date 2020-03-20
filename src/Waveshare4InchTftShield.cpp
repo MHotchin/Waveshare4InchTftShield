@@ -1,8 +1,6 @@
 
 #include <Arduino.h>
-//#include <Wire.h>
 #include <SPI.h>
-
 #include <Adafruit_GFX.h>
 
 #include "Waveshare4InchTftShield.h"
@@ -28,7 +26,7 @@ namespace
 
 	constexpr unsigned int SD_CS = D2;
 #elif defined ARDUINO_ESP32_DEV
-	
+
 	//  TO-DO - is this specific enough?  Pins below are for Wemos D1 R32, but that
 	//  doesn't seem to have its own board.
 
@@ -39,14 +37,14 @@ namespace
 		digitalWrite(pin, val ? HIGH : LOW);
 	}
 
-	constexpr unsigned int LCD_CS  = 5;  // 10; //  LCD Chip Select
-	constexpr unsigned int LCD_BL  = 13; // 9;  //  LCD Backlight
+	constexpr unsigned int LCD_CS = 5;  // 10; //  LCD Chip Select
+	constexpr unsigned int LCD_BL = 13; // 9;  //  LCD Backlight
 	constexpr unsigned int LCD_RST = 12; // 8;  //  LCD Reset
-	constexpr unsigned int LCD_DC  = 14; // 7;  //  LCD Data/Control
+	constexpr unsigned int LCD_DC = 14; // 7;  //  LCD Data/Control
 
 	constexpr unsigned int TP_CS = 17;   // 4;
-	//constexpr unsigned int TP_IRQ = 3;
-	//constexpr unsigned int TP_BUSY = 6;
+	constexpr unsigned int TP_IRQ = 25;  // 3
+	constexpr unsigned int TP_BUSY = 27; // 6
 
 	constexpr unsigned int SD_CS = 16;   // 5;
 
@@ -60,8 +58,8 @@ namespace
 	constexpr unsigned int LCD_DC = 7;  //  LCD Data/Control
 
 	constexpr unsigned int TP_CS = 4;
-	//constexpr unsigned int TP_IRQ = 3;
-	//constexpr unsigned int TP_BUSY = 6;
+	constexpr unsigned int TP_IRQ = 3;
+	constexpr unsigned int TP_BUSY = 6;
 
 	constexpr unsigned int SD_CS = 5;
 
@@ -69,47 +67,20 @@ namespace
 	//  Dimensions in default rotation.
 	constexpr int16_t LCD_WIDTH = 320;
 	constexpr int16_t LCD_HEIGHT = 480;
-}
 
-//  Data sheets says min clock width is 66ns, for a max clock of 15 MHz.  Except, this
+	//  Data sheets says min clock width is 66ns, for a max clock of 15 MHz.  Except, this
 //  thing isn't *actually* SPI!  It's a 16 bit shift register connected to the parallel
 //  interface, and that can run at 20 Mhz
-SPISettings _tftSpiSettingsWrite(20000000, MSBFIRST, SPI_MODE0);
+	SPISettings _tftSpiSettingsWrite(20000000, MSBFIRST, SPI_MODE0);
 
-//  TFT reads are slower, 150 ns period.
-//  Nevermind, Waveshare shield doesn't support reads at all!
-//SPISettings _tftSpiSettingsRead(6500000, MSBFIRST, SPI_MODE0);
+	//  TFT reads are slower, 150 ns period.
+	//  Nevermind, Waveshare shield doesn't support reads at all!
+	//SPISettings _tftSpiSettingsRead(6500000, MSBFIRST, SPI_MODE0);
 
-//  Touch screen wants 400 ns period.
-SPISettings tsSpiSettings(2500000, MSBFIRST, SPI_MODE0);
+	//  Touch screen wants 400 ns period.
+	SPISettings tsSpiSettings(2500000, MSBFIRST, SPI_MODE0);
 
 
-Waveshare4InchTftShield::Waveshare4InchTftShield()
-	:Adafruit_GFX(LCD_WIDTH, LCD_HEIGHT)
-{
-	//  Default Adafruit value
-	pressureThreshhold = 10;
-
-	//  Set input pins in a sane state, so SPI can be initialized
-	pinMode(LCD_CS, OUTPUT);
-	digitalWrite(LCD_CS, HIGH);
-	pinMode(LCD_RST, OUTPUT);
-	digitalWrite(LCD_RST, HIGH);
-	pinMode(LCD_DC, OUTPUT);
-	pinMode(LCD_BL, OUTPUT);
-	analogWrite(LCD_BL, 0);
-
-	pinMode(TP_CS, OUTPUT);
-	digitalWrite(TP_CS, HIGH);
-	//pinMode(TP_IRQ, INPUT_PULLUP);
-	//pinMode(TP_BUSY, INPUT_PULLUP);
-
-	pinMode(SD_CS, OUTPUT);
-	digitalWrite(SD_CS, HIGH);
-}
-
-namespace
-{
 	inline void lcdWriteReg(uint8_t reg)
 	{
 
@@ -205,12 +176,12 @@ namespace
 				while (!(SPSR & _BV(SPIF)));
 				SPDR = lsb;
 		case 1:
-				count--;
-				while (!(SPSR & _BV(SPIF)));
-				SPDR = msb;
-				asm volatile("nop");
-				while (!(SPSR & _BV(SPIF)));
-				SPDR = lsb;
+			count--;
+			while (!(SPSR & _BV(SPIF)));
+			SPDR = msb;
+			asm volatile("nop");
+			while (!(SPSR & _BV(SPIF)));
+			SPDR = lsb;
 			}
 		}
 		// MUST wait for final shift out to complete!  Otherwise subsequent commands
@@ -245,7 +216,22 @@ namespace
 			SPI.transfer16(data);
 		}
 #endif
-}
+	}
+
+	inline void lcdWriteDataCount(uint16_t *pData, unsigned long count)
+	{
+		lcdWriteReg(0x2C);
+		digitalWrite(LCD_DC, HIGH);
+
+#ifdef ARDUINO_ARCH_ESP32
+		while (count--)
+			SPI.transfer16(*pData++);
+
+#else
+		while (count--)
+			SPI.transfer16(*pData++);
+#endif
+	}
 
 	inline void lcdWriteCommand(uint8_t reg, uint8_t data)
 	{
@@ -278,351 +264,249 @@ namespace
 		lcdWriteReg(0x2a);
 		digitalWrite(LCD_DC, HIGH);
 		SPI.transfer((byte *)&b, sizeof(b));
+		//for (auto i = 0; i < 8; i++)
+		//{
+		//	SPI.transfer(b.data[i]);
+		//}
 
 		b = {0, (uint8_t)(yStart >> 8), 0, (uint8_t)(yStart & 0xFF), 0, (uint8_t)(yEnd >> 8), 0, (uint8_t)(yEnd & 0xFF)};
 		lcdWriteReg(0x2b);
 		digitalWrite(LCD_DC, HIGH);
 		SPI.transfer((byte *)&b, sizeof(b));
+		//for (auto i = 0; i < 8; i++)
+		//{
+		//	SPI.transfer(b.data[i]);
+		//}
 	}
+
+
 }
 
 
-bool
-Waveshare4InchTftShield::begin()
+namespace Waveshare4InchTftShieldImpl
 {
-	return begin(0xff);
-}
-
-
-bool
-Waveshare4InchTftShield::begin(uint8_t brightness)
-{
-	pinMode(LCD_CS, OUTPUT);
-	digitalWrite(LCD_CS, HIGH);
-	pinMode(LCD_RST, OUTPUT);
-	digitalWrite(LCD_RST, HIGH);
-	pinMode(LCD_DC, OUTPUT);
-	pinMode(LCD_BL, OUTPUT);
-	analogWrite(LCD_BL, 0);
-
-	pinMode(TP_CS, OUTPUT);
-	digitalWrite(TP_CS, HIGH);
-	//pinMode(TP_IRQ, INPUT_PULLUP);
-	//pinMode(TP_BUSY, INPUT_PULLUP);
-
-	pinMode(SD_CS, OUTPUT);
-	digitalWrite(SD_CS, HIGH);
-
-	initializeLcd();
-	setRotation(0);
-	analogWrite(LCD_BL, brightness);
-	return true;
-}
-
-
-
-uint8_t
-Waveshare4InchTftShield::GetSdCardCS()
-{
-	return SD_CS;
-}
-
-
-
-void
-Waveshare4InchTftShield::initializeLcd()
-{
-
-	//  Trigger hardware reset.
-	digitalWrite(LCD_RST, HIGH);
-	delay(5);
-	digitalWrite(LCD_RST, LOW);
-	delayMicroseconds(20);
-	digitalWrite(LCD_RST, HIGH);
-
-	//  TO-DO - how long after a reset until the screen can be used?  Doesn't seem to be
-	//  specified in the datasheet.
-	//  Experimentally, any less than this and the initial screen clear is incomplete.
-	delay(65);
-
-	startWrite();
+	void initializePins()
 	{
-		//  Power control settings
-		lcdWriteCommand(0xC0, 0x19, 0x1a);
-		lcdWriteCommand(0xC1, 0x45, 0x00);
-		lcdWriteCommand(0xC2, 0x33);        //  Power/Reset on default
+		//  Set input pins in a sane state, so SPI can be initialized
+		pinMode(LCD_CS, OUTPUT);
+		digitalWrite(LCD_CS, HIGH);
+		pinMode(LCD_RST, OUTPUT);
+		digitalWrite(LCD_RST, HIGH);
+		pinMode(LCD_DC, OUTPUT);
+		pinMode(LCD_BL, OUTPUT);
+		analogWrite(LCD_BL, 0);
 
-		lcdWriteCommand(0xC5, 0x00, 0x28);  //  VCOM control
+		pinMode(TP_CS, OUTPUT);
+		digitalWrite(TP_CS, HIGH);
+		pinMode(TP_IRQ, INPUT_PULLUP);
+		pinMode(TP_BUSY, INPUT_PULLUP);
 
-		lcdWriteCommand(0xB1, 0xA0, 0x11);  //  Frame rate control
-
-		lcdWriteCommand(0xB4, 0x02);        //  Display Z Inversion
-
-		lcdWriteReg(0xB6);                  //  Display Control Function      
-		lcdWriteData(0x00);
-		lcdWriteDataContinue(0x42);
-		lcdWriteDataContinue(0x3B);
-
-		lcdWriteReg(0xE0);                  //  Positive Gamma control
-		lcdWriteData(0x1F);
-		lcdWriteDataContinue(0x25);
-		lcdWriteDataContinue(0x22);
-		lcdWriteDataContinue(0x0B);
-		lcdWriteDataContinue(0x06);
-		lcdWriteDataContinue(0x0A);
-		lcdWriteDataContinue(0x4E);
-		lcdWriteDataContinue(0xC6);
-		lcdWriteDataContinue(0x39);
-		lcdWriteDataContinue(0x00);
-		lcdWriteDataContinue(0x00);
-		lcdWriteDataContinue(0x00);
-		lcdWriteDataContinue(0x00);
-		lcdWriteDataContinue(0x00);
-		lcdWriteDataContinue(0x00);
-
-		lcdWriteReg(0XE1);                  //  Negative Gamma control
-		lcdWriteData(0x1F);
-		lcdWriteDataContinue(0x3F);
-		lcdWriteDataContinue(0x3F);
-		lcdWriteDataContinue(0x0F);
-		lcdWriteDataContinue(0x1F);
-		lcdWriteDataContinue(0x0F);
-		lcdWriteDataContinue(0x46);
-		lcdWriteDataContinue(0x49);
-		lcdWriteDataContinue(0x31);
-		lcdWriteDataContinue(0x05);
-		lcdWriteDataContinue(0x09);
-		lcdWriteDataContinue(0x03);
-		lcdWriteDataContinue(0x1C);
-		lcdWriteDataContinue(0x1A);
-		lcdWriteDataContinue(0x00);
-
-		lcdWriteCommand(0x3A, 0x55);
-
-		//  Set initial rotation to match AFX defaults - tall / narrow
-		lcdWriteCommand(0xB6, 0x00, 0x22);
-		lcdWriteCommand(0x36, 0x08);
-
-		lcdWriteReg(0x11); // Sleep out
-
-		//  Fill screen to black
-		writeFillRect(0, 0, LCD_WIDTH, LCD_HEIGHT, 0x0000);
-		
-		lcdWriteReg(0x29);  // Turn on display
+		pinMode(SD_CS, OUTPUT);
+		digitalWrite(SD_CS, HIGH);
 	}
-	endWrite();
-}
 
-
-void
-Waveshare4InchTftShield::drawPixel(
-	int16_t x, int16_t y, uint16_t color)
-{
-	startWrite();
-
-	writePixel(x, y, color);
-
-	endWrite();
-}
-
-void
-Waveshare4InchTftShield::startWrite()
-{
-	SPI.beginTransaction(_tftSpiSettingsWrite);
-	digitalWrite(LCD_CS, LOW);
-}
-
-void
-Waveshare4InchTftShield::writePixel(
-	int16_t x, int16_t y, uint16_t color)
-{
-	if (x < 0) return;
-	if (y < 0) return;
-
-	if (x >= width()) return;
-	if (y >= height()) return;
-
-	writeFillRect2(x, y, 1, 1, color);
-}
-
-
-void
-Waveshare4InchTftShield::writeFillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color)
-{
-	//  Negative widths, so swap left and right sides
-	if (w < 0)
+	void startWrite()
 	{
-		w = -w;
-		x -= w;
+		SPI.beginTransaction(_tftSpiSettingsWrite);
+		digitalWrite(LCD_CS, LOW);
 	}
 
-	//  Negative height, so swap top and bottom
-	if (h < 0)
+	void initializeLcd()
 	{
-		h = -h;
-		y -= h;
+		//  Trigger hardware reset.
+		digitalWrite(LCD_RST, HIGH);
+		delay(5);
+		digitalWrite(LCD_RST, LOW);
+		delayMicroseconds(20);
+		digitalWrite(LCD_RST, HIGH);
+
+		//  TO-DO - how long after a reset until the screen can be used?  Doesn't seem to be
+		//  specified in the datasheet.
+		//  Experimentally, any less than this and the initial screen clear is incomplete.
+		delay(65);
+
+		startWrite();
+		{
+			//  Power control settings
+			lcdWriteCommand(0xC0, 0x19, 0x1a);
+			lcdWriteCommand(0xC1, 0x45, 0x00);
+			lcdWriteCommand(0xC2, 0x33);        //  Power/Reset on default
+
+			lcdWriteCommand(0xC5, 0x00, 0x28);  //  VCOM control
+
+			lcdWriteCommand(0xB1, 0xA0, 0x11);  //  Frame rate control
+
+			lcdWriteCommand(0xB4, 0x02);        //  Display Z Inversion
+
+			lcdWriteReg(0xB6);                  //  Display Control Function      
+			lcdWriteData(0x00);
+			lcdWriteDataContinue(0x42);
+			lcdWriteDataContinue(0x3B);
+
+			lcdWriteReg(0xE0);                  //  Positive Gamma control
+			lcdWriteData(0x1F);
+			lcdWriteDataContinue(0x25);
+			lcdWriteDataContinue(0x22);
+			lcdWriteDataContinue(0x0B);
+			lcdWriteDataContinue(0x06);
+			lcdWriteDataContinue(0x0A);
+			lcdWriteDataContinue(0x4E);
+			lcdWriteDataContinue(0xC6);
+			lcdWriteDataContinue(0x39);
+			lcdWriteDataContinue(0x00);
+			lcdWriteDataContinue(0x00);
+			lcdWriteDataContinue(0x00);
+			lcdWriteDataContinue(0x00);
+			lcdWriteDataContinue(0x00);
+			lcdWriteDataContinue(0x00);
+
+			lcdWriteReg(0XE1);                  //  Negative Gamma control
+			lcdWriteData(0x1F);
+			lcdWriteDataContinue(0x3F);
+			lcdWriteDataContinue(0x3F);
+			lcdWriteDataContinue(0x0F);
+			lcdWriteDataContinue(0x1F);
+			lcdWriteDataContinue(0x0F);
+			lcdWriteDataContinue(0x46);
+			lcdWriteDataContinue(0x49);
+			lcdWriteDataContinue(0x31);
+			lcdWriteDataContinue(0x05);
+			lcdWriteDataContinue(0x09);
+			lcdWriteDataContinue(0x03);
+			lcdWriteDataContinue(0x1C);
+			lcdWriteDataContinue(0x1A);
+			lcdWriteDataContinue(0x00);
+
+			//  From original driver, but register numbers don't make any sense.
+			if (0)
+			{
+				lcdWriteReg(0XF1);
+				lcdWriteData(0x36);
+				lcdWriteDataContinue(0x04);
+				lcdWriteDataContinue(0x00);
+				lcdWriteDataContinue(0x3C);
+				lcdWriteDataContinue(0x0F);
+				lcdWriteDataContinue(0x0F);
+				lcdWriteDataContinue(0xA4);
+				lcdWriteDataContinue(0x02);
+
+				lcdWriteReg(0XF2);
+				lcdWriteData(0x18);
+				lcdWriteDataContinue(0xA3);
+				lcdWriteDataContinue(0x12);
+				lcdWriteDataContinue(0x02);
+				lcdWriteDataContinue(0x32);
+				lcdWriteDataContinue(0x12);
+				lcdWriteDataContinue(0xFF);
+				lcdWriteDataContinue(0x32);
+				lcdWriteDataContinue(0x00);
+
+				lcdWriteReg(0XF4);
+				lcdWriteData(0x40);
+				lcdWriteDataContinue(0x00);
+				lcdWriteDataContinue(0x08);
+				lcdWriteDataContinue(0x91);
+				lcdWriteDataContinue(0x04);
+
+				lcdWriteReg(0XF8);
+				lcdWriteData(0x21);
+				lcdWriteDataContinue(0x04);
+			}
+
+			lcdWriteCommand(0x3A, 0x55);
+
+			//  Set initial rotation to match AFX defaults - tall / narrow
+			lcdWriteCommand(0xB6, 0x00, 0x22);
+			lcdWriteCommand(0x36, 0x08);
+
+			lcdWriteReg(0x11); // Sleep out
+
+			//  Fill screen to black
+			writeFillRect2(0, 0, LCD_WIDTH, LCD_HEIGHT, 0x0000);
+
+			lcdWriteReg(0x29);  // Turn on display
+		}
+		endWrite();
 	}
 
-	// Left side offscreen, clip
-	if (x < 0)
+	//  Version with NO bounds checking!
+	void writeFillRect2(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color)
 	{
-		w += x;
-		x = 0;
+		lcdWriteActiveRect(x, y, w, h);
+		lcdWriteDataRepeat(color, (int32_t)w * (int32_t)h);
 	}
 
-	// Top offscreen, clip
-	if (y < 0)
+
+	void writeColors(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t *pColors)
 	{
-		h += y;
-		y = 0;
+		lcdWriteActiveRect(x, y, w, h);
+
+		lcdWriteDataCount(pColors, (unsigned long)w * (unsigned long)h);
 	}
 
-	//  Rightside offscreen, clip
-	if (x + w > width())
+	void endWrite()
 	{
-		w = width() - x;
+		digitalWrite(LCD_CS, HIGH);
+		SPI.endTransaction();
 	}
 
-	// bottom offscreen, clip
-	if (y + h > height())
+	void setRotation(uint8_t r)
 	{
-		h = height() - y;
+		uint8_t MemoryAccessControl_0x36 = 0;
+
+		switch (r & 0x03)
+		{
+		case 0x00:
+			MemoryAccessControl_0x36 = 0x08;
+			break;
+
+		case 0x01:
+			MemoryAccessControl_0x36 = 0xA8;
+			break;
+
+		case 0x02:
+			MemoryAccessControl_0x36 = 0xC8;
+			break;
+
+		case 0x03:
+			MemoryAccessControl_0x36 = 0x68;
+			break;
+		}
+
+		startWrite();
+		{
+			lcdWriteCommand(0x36, MemoryAccessControl_0x36);
+		}
+		endWrite();
 	}
 
-	//  Entire width or entire height is offscreen
-	if (w <= 0) return;
-	if (h <= 0) return;
-
-	// Now, 0 <= x <= x+w <= WIDTH
-	// And, 0 <= y <= y+h <= HEIGHT
-	lcdWriteActiveRect(x, y, w, h);
-	lcdWriteDataRepeat(color, (int32_t)w * (int32_t)h);
-}
-
-void
-Waveshare4InchTftShield::writeFillRect2(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color)
-{
-	lcdWriteActiveRect(x, y, w, h);
-	lcdWriteDataRepeat(color, (int32_t)w * (int32_t)h);
-}
-
-void
-Waveshare4InchTftShield::writeFastVLine(int16_t x, int16_t y, int16_t h, uint16_t color)
-{
-	writeFillRect(x, y, 1, h, color);
-}
-
-
-void
-Waveshare4InchTftShield::writeFastHLine(int16_t x, int16_t y, int16_t w, uint16_t color)
-{
-	writeFillRect(x, y, w, 1, color);
-}
-
-
-void
-Waveshare4InchTftShield::endWrite()
-{
-	digitalWrite(LCD_CS, HIGH);
-	SPI.endTransaction();
-}
-
-void
-Waveshare4InchTftShield::setRotation(uint8_t r)
-{
-	uint8_t MemoryAccessControl_0x36 = 0;
-
-	switch (r & 0x03)
+	void invertDisplay(boolean i)
 	{
-	case 0x00:
-		MemoryAccessControl_0x36 = 0x08;
-		break;
-
-	case 0x01:
-		MemoryAccessControl_0x36 = 0xA8;
-		break;
-
-	case 0x02:
-		MemoryAccessControl_0x36 = 0xC8;
-		break;
-
-	case 0x03:
-		MemoryAccessControl_0x36 = 0x68;
-		break;
+		startWrite();
+		{
+			lcdWriteReg(i ? 0x21 : 0x20);
+		}
+		endWrite();
 	}
 
-	startWrite();
+	void setIdleMode(bool idle)
 	{
-		lcdWriteCommand(0x36, MemoryAccessControl_0x36);
+		startWrite();
+		{
+			lcdWriteReg(idle ? 0x39 : 0x38);
+		}
+		endWrite();
 	}
-	endWrite();
 
-	//  Don't forget to tell the base class!
-	Adafruit_GFX::setRotation(r);
-}
-
-
-void
-Waveshare4InchTftShield::invertDisplay(boolean i)
-{
-	startWrite();
+	void setScreenBrightness(uint8_t brightness)
 	{
-		lcdWriteReg(i ? 0x21 : 0x20);
+		analogWrite(LCD_BL, brightness);
 	}
-	endWrite();
-}
 
-
-void
-Waveshare4InchTftShield::drawFastVLine(int16_t x, int16_t y, int16_t h, uint16_t color)
-{
-	startWrite();
-	writeFillRect(x, y, 1, h, color);
-	endWrite();
-}
-
-
-void
-Waveshare4InchTftShield::drawFastHLine(int16_t x, int16_t y, int16_t w, uint16_t color)
-{
-	startWrite();
-	writeFillRect(x, y, w, 1, color);
-	endWrite();
-}
-
-void
-Waveshare4InchTftShield::fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color)
-{
-	startWrite();
-	writeFillRect(x, y, w, h, color);
-	endWrite();
-}
-
-void
-Waveshare4InchTftShield::fillScreen(uint16_t color)
-{
-	startWrite();
-	writeFillRect2(0, 0, width(), height(), color);
-	endWrite();
-}
-
-
-//  Non Adafruit_GFX APIs.
-void
-Waveshare4InchTftShield::setScreenBrightness(uint8_t brightness)
-{
-	analogWrite(LCD_BL, brightness);
-}
-
-
-void
-Waveshare4InchTftShield::setIdleMode(bool idle)
-{
-	startWrite();
+	unsigned int GetSdCardCS()
 	{
-		lcdWriteReg(idle ? 0x39 : 0x38);
+		return SD_CS;
 	}
-	endWrite();
 }
 
 //  Touchscreen interface
@@ -713,7 +597,7 @@ namespace
 constexpr uint16_t _rxplate = 300;
 
 uint16_t
-Waveshare4InchTftShield::pressure()
+WaveshareTouchScreen::pressure()
 {
 	uint32_t z1 = readChannel(0b10110000);
 	uint32_t z2 = readChannel(0b11000000);
@@ -731,13 +615,13 @@ Waveshare4InchTftShield::pressure()
 
 
 int16_t
-Waveshare4InchTftShield::readTouchY()
+WaveshareTouchScreen::readTouchY()
 {
 	return readChannel(0b10010000);
 }
 
 int16_t
-Waveshare4InchTftShield::readTouchX()
+WaveshareTouchScreen::readTouchX()
 {
 	return readChannel(0b11010000);
 }
@@ -746,7 +630,7 @@ constexpr int slop = 7;
 
 // Returns un-normalized data, oriented the same as the rotation 0 setting.
 TSPoint
-Waveshare4InchTftShield::getPoint()
+WaveshareTouchScreen::getPoint()
 {
 	int x, y, z;
 	int samples[NUMSAMPLES];
@@ -830,19 +714,19 @@ namespace
 }
 
 const TSConfigData &
-Waveshare4InchTftShield::getTsConfigData()
+WaveshareTouchScreen::getTsConfigData()
 {
 	return tscd;
 }
 
 void
-Waveshare4InchTftShield::setTsConfigData(const TSConfigData &newData)
+WaveshareTouchScreen::setTsConfigData(const TSConfigData &newData)
 {
 	tscd = newData;
 }
 
 void
-Waveshare4InchTftShield::resetTsConfigData()
+WaveshareTouchScreen::resetTsConfigData()
 {
 	tscd = {100, 900, 75, 900};
 }
@@ -861,8 +745,9 @@ namespace
 //  adjusts the limits over time.  To calibrate, just run the stylus off each of the four
 //  edges of the screen.
 bool
-Waveshare4InchTftShield::normalizeTsPoint(
-	TSPoint &p)
+WaveshareTouchScreen::normalizeTsPoint(
+	TSPoint &p,
+	uint8_t rotation)
 {
 	bool fReturn = false;
 
