@@ -1,4 +1,9 @@
 # Waveshare4InchTftShield
+
+# NOW OBSOLETE
+## This library has been merged into https://github.com/ImpulseAdventure/Waveshare_ILI9486.  You should use that library instead.
+
+
 Graphics and touchscreen drivers for Waveshare 4" shield.
 
 This is an re-implementation of the 'Adafruit_GFX' graphics API.  This version is
